@@ -36,7 +36,7 @@ else if(page==='My Actions'){h=heading('My Actions',btn('+ New Action','editActi
 else if(page==='Attention Required'){h=heading('Attention Required',btn('+ New Action','editAction()',true))+'<h2>Red / Amber projects</h2>'+projectTable(projects().filter(p=>p.health!=='Green').filter(match))+'<h2 style="margin-top:20px">Blocked and awaiting approval</h2>'+actionTable(acts().filter(a=>['On Hold','Awaiting Approval'].includes(a.status)).filter(match))}
 else if(page==='Weekly Status'){h=heading('Weekly Status',btn('Copy summary','copySummary()'))+'<div class="notice">Weekly meeting view reflects the current demo records. No historical snapshots are stored.</div>'+projectTable(projects().filter(p=>p.status!=='Cancelled'))+'<h2 style="margin-top:20px">Open actions</h2>'+actionTable(acts().filter(a=>a.status!=='Completed'))}
 else if(page==='Quarterly Priorities'){h=heading('Quarterly Priorities')+'<div class="cards">'+['Destination visibility','Residential leasing campaigns','Marketing operations efficiency','Resident communications'].map((x,i)=>'<div class="card"><b>'+x+'</b><p class="muted">Illustrative objective · Q4 2026</p><strong>'+[55,70,40,65][i]+'%</strong></div>').join('')+'</div><div class="notice">Quarterly priorities are example content; not actual AFRE performance.</div>'}
-else if(page==='Team & Workstreams'){h=heading('Team & Workstreams',btn('+ Add Team Member','editMember()',true))+'<div class="cards">'+db.team.map(t=>'<div class="card"><b>'+esc(t.name)+'</b><p class="muted">'+esc(t.workstream||'No workstream')+'</p><p class="muted">'+(t.active?'Active':'Inactive')+' · '+projects().filter(p=>p.owner===t.id).length+' projects · '+acts().filter(a=>a.owner===t.id).length+' actions</p>'+btn('Edit','editMember(\''+t.id+'\')')+'</div>').join('')+'</div>'}
+else if(page==='Team & Workstreams'){h=heading('Team & Workstreams',btn('+ Add Team Member','editMember()',true)+btn('+ Add Workstream','newWorkstream()'))+'<div class="cards">'+db.team.map(t=>'<div class="card"><b>'+esc(t.name)+'</b><p class="muted">'+esc(t.workstream||'No workstream')+'</p><p class="muted">'+(t.active?'Active':'Inactive')+' · '+projects().filter(p=>p.owner===t.id).length+' projects · '+acts().filter(a=>a.owner===t.id).length+' actions</p>'+btn('Edit','editMember(\''+t.id+'\')')+'</div>').join('')+'</div>'}
 else if(page==='Management Summary'){h=heading('Management Summary',btn('Copy summary','copySummary()'))+'<div class="cards">'+['Brand & Destination','ResiComm','Digital / MarTech','Social Media & Media Buying'].map(w=>'<div class="card"><span class="muted">'+w+'</span><strong>'+projects().filter(p=>p.workstream===w).length+'</strong><span class="muted">Projects</span></div>').join('')+'</div><h2>Portfolio</h2>'+projectTable(projects())}
 else if(page==='Archive & Trash'){h=heading('Archive & Trash')+'<h2>Archived</h2>'+trashTable('archived')+'<h2 style="margin-top:20px">Trash</h2>'+trashTable('deleted')}
 v.innerHTML=h}
@@ -75,7 +75,7 @@ sections.splice(sections.indexOf('Team & Workstreams')+1,0,'Workstreams & Assets
 const oldDraw=draw;
 draw=function(){
 if(page==='Workstreams & Assets'){
-document.getElementById('view').innerHTML=heading('Workstreams & Assets',btn('+ New Workstream',"addCategory('workstreams')",true)+btn('+ New Asset',"addCategory('assets')",true)+btn('Export Excel','exportExcel()'))+
+document.getElementById('view').innerHTML=heading('Workstreams & Assets',btn('+ New Workstream','newWorkstream()',true)+btn('+ New Asset',"addCategory('assets')",true)+btn('Export Excel','exportExcel()'))+
 '<div class="two"><div class="panel"><h2>Workstreams</h2>'+db.workstreams.map((w,i)=>'<p>'+esc(w)+' <button class="link" onclick="renameCategory(\\'workstreams\\','+i+')">Rename</button> <button class="link danger" onclick="deleteCategory(\\'workstreams\\','+i+')">Delete</button></p>').join('')+'</div><div class="panel"><h2>Assets</h2>'+db.assets.map((w,i)=>'<p>'+esc(w)+' <button class="link" onclick="renameCategory(\\'assets\\','+i+')">Rename</button> <button class="link danger" onclick="deleteCategory(\\'assets\\','+i+')">Delete</button></p>').join('')+'</div></div>';return;
 }
 
@@ -94,6 +94,24 @@ editProject=function(id){oldEditProject(id);const form=document.getElementById('
 const oldEditMember=editMember;
 editMember=function(id){oldEditMember(id);const el=document.getElementById('editform')?.elements.workstream;if(el){const value=el.value;el.innerHTML=db.workstreams.map(w=>'<option value="'+esc(w)+'" '+(w===value?'selected':'')+'>'+esc(w)+'</option>').join('')}}
 
+
+function newWorkstream(){
+modal('Add new workstream',
+'<label class="wide">Workstream name<input name="name" required maxlength="100" placeholder="e.g. Community Engagement"></label>'+
+'<label class="wide">Description (optional)<textarea name="description" placeholder="Purpose or scope of this workstream"></textarea></label>',
+'saveNewWorkstream()')
+}
+function saveNewWorkstream(){
+const f=document.getElementById('editform');if(!f)return;
+const name=f.elements.name.value.trim();
+if(!name){alert('Enter a workstream name.');return}
+if(db.workstreams.some(w=>w.toLowerCase()===name.toLowerCase())){alert('This workstream already exists.');return}
+db.workstreams.push(name);
+db.workstreamDescriptions ||= {};
+const description=f.elements.description.value.trim();
+if(description)db.workstreamDescriptions[name]=description;
+log('Created workstream: '+name);save();closeModal();render();
+}
 function deleteCategory(type,index){
 const name=db[type][index];const uses=type==='workstreams'?db.projects.filter(p=>p.workstream===name).length+db.team.filter(t=>t.workstream===name).length:db.projects.filter(p=>p.asset===name).length;
 if(uses){alert('Cannot delete '+name+': it is assigned to '+uses+' records. Reassign those records first.');return}
