@@ -117,4 +117,114 @@ const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8;'}),url=URL.cre
 const oldHeading=heading;
 heading=function(title,buttons=''){return oldHeading(title,buttons+btn('Export Excel','exportExcel()'))}
 render();
-</script></body></html>
+</script>
+<style>
+.board-controls{background:#fff;border:1px solid #e2e9f0;border-radius:12px;padding:12px;margin:0 0 14px}
+.board-controls .toolbar{margin:0 0 9px}
+.board-controls .toolbar:last-child{margin-bottom:0}
+.board-controls select,.board-controls input{padding:7px}
+.board-controls label{font-size:12px;color:#52677b}
+.board-cell{width:100%;min-width:100px;padding:6px 7px;border:1px solid transparent;border-radius:6px;background:transparent;font-size:13px}
+.board-cell:focus,.board-cell:hover{background:#fff;border-color:#8db8c4}
+.board-cell[type=date]{min-width:140px}
+.board-select{min-width:125px}
+.board-check{width:17px;height:17px}
+.board-table th{white-space:nowrap}
+.board-table td{padding:6px 9px}
+.board-table tr.is-selected{background:#e9f7f8}
+.board-table td.name-cell{min-width:240px}
+.board-table .board-cell.name-input{min-width:200px;font-weight:600}
+.board-controls details{display:inline-block;position:relative}
+.board-controls details summary{cursor:pointer;list-style:none;border:1px solid #d6e0ea;border-radius:8px;padding:8px 12px}
+.column-panel{position:absolute;z-index:4;background:white;box-shadow:0 8px 25px #10283e33;padding:14px;border:1px solid #d6e0ea;border-radius:10px;min-width:230px;max-height:360px;overflow:auto}
+.column-panel label{display:flex;align-items:center;gap:8px;margin:9px 0}
+.bulkbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#e4f3f3;border:1px solid #a8d4d4;border-radius:9px;padding:9px 12px;margin:9px 0}
+</style>
+<script>
+const boardDefaults={
+project:['name','asset','workstream','owner','status','health','due','actions'],
+action:['name','projectId','owner','status','priority','due']
+};
+const boardFields={
+project:[['name','Project'],['asset','Asset'],['workstream','Workstream'],['owner','Lead'],['status','Status'],['health','Health'],['due','Due'],['actions','Linked actions'],['type','Type'],['nextAction','Next action'],['notes','Notes']],
+action:[['name','Action'],['projectId','Project'],['owner','Assignee'],['status','Status'],['priority','Priority'],['due','Due']]
+};
+let boardConfig;
+try{boardConfig=JSON.parse(localStorage.getItem('afre-board-settings'))||{}}catch{boardConfig={}}
+boardConfig.project ||= {columns:boardDefaults.project.slice(),status:'All',workstream:'All',asset:'All',sort:'name',direction:'asc'};
+boardConfig.action ||= {columns:boardDefaults.action.slice(),status:'All',workstream:'All',asset:'All',sort:'name',direction:'asc'};
+let selectedBoard={project:new Set(),action:new Set()};
+let boardKind='project';
+const boardSave=()=>localStorage.setItem('afre-board-settings',JSON.stringify(boardConfig));
+const boardCollection=kind=>kind==='project'?db.projects:db.actions;
+const boardStatus=()=>['Not Started','In Progress','On Hold','Awaiting Approval','Completed','Cancelled'];
+const boardOption=(value,label,chosen)=>'<option value="'+esc(value)+'" '+(String(value)===String(chosen)?'selected':'')+'>'+esc(label)+'</option>';
+const boardDropdown=(items,chosen)=>items.map(([id,label])=>boardOption(id,label,chosen)).join('');
+const boardSelect=(kind,item,key,values)=>'<select class="board-cell board-select" aria-label="'+esc(key)+'" onchange="boardEdit(\''+kind+'\',\''+item.id+'\',\''+key+'\',this.value)">'+boardDropdown(values,item[key])+'</select>';
+function boardInput(kind,item,key,type='text'){
+const value=item[key]||'';
+return '<input class="board-cell '+(key==='name'?'name-input':'')+'" type="'+type+'" aria-label="'+esc(key)+'" value="'+esc(value)+'" onchange="boardEdit(\''+kind+'\',\''+item.id+'\',\''+key+'\',this.value)">';
+}
+function boardEdit(kind,id,key,value){
+const item=boardCollection(kind).find(x=>x.id===id);if(!item)return;
+if(key==='name'&&!value.trim()){alert('A title is required.');render();return}
+if(item[key]===value)return;
+item[key]=value;log('Updated '+kind+' '+item.name+' ('+key+')');save();
+if(['owner','status','asset','workstream','projectId','health'].includes(key))render();
+}
+function boardCell(kind,item,key){
+if(key==='actions')return '<span class="pill">'+acts().filter(a=>a.projectId===item.id).length+'</span>';
+if(key==='owner')return boardSelect(kind,item,key,owners());
+if(key==='projectId')return boardSelect(kind,item,key,[['','Inbox / Unassigned'],...projects().map(p=>[p.id,p.name])]);
+if(key==='workstream')return boardSelect(kind,item,key,db.workstreams.map(x=>[x,x]));
+if(key==='asset')return boardSelect(kind,item,key,db.assets.map(x=>[x,x]));
+if(key==='status')return boardSelect(kind,item,key,boardStatus().map(x=>[x,x]));
+if(key==='health')return boardSelect(kind,item,key,['Green','Amber','Red'].map(x=>[x,x]));
+if(key==='priority')return boardSelect(kind,item,key,['Low','Medium','High','Urgent'].map(x=>[x,x]));
+return boardInput(kind,item,key,key==='due'?'date':'text');
+}
+function boardTable(kind,items){
+const columns=boardConfig[kind].columns;
+return '<div class="tablewrap"><table class="board-table"><thead><tr><th><input class="board-check" type="checkbox" aria-label="Select all visible" onchange="boardSelectAll(\''+kind+'\',this.checked)"></th>'+columns.map(k=>'<th>'+esc(boardFields[kind].find(f=>f[0]===k)?.[1]||k)+'</th>').join('')+'<th>Manage</th></tr></thead><tbody>'+items.map(item=>'<tr class="'+(selectedBoard[kind].has(item.id)?'is-selected':'')+'"><td><input class="board-check" type="checkbox" data-board-select="'+kind+'" value="'+esc(item.id)+'" '+(selectedBoard[kind].has(item.id)?'checked':'')+' onchange="boardToggle(\''+kind+'\',\''+item.id+'\',this.checked)"></td>'+columns.map(k=>'<td class="'+(k==='name'?'name-cell':'')+'">'+boardCell(kind,item,k)+'</td>').join('')+'<td>'+btn('Edit',(kind==='project'?'editProject':'editAction')+'(\''+item.id+'\')')+' '+btn('⋯','menu(\''+kind+'\',\''+item.id+'\')')+'</td></tr>').join('')+'</tbody></table>'+(items.length?'':'<div class="empty">No matching records. Try clearing your filters.</div>')+'</div>';
+}
+projectTable=function(items){return boardTable('project',items)};
+actionTable=function(items){return boardTable('action',items)};
+function boardToggle(kind,id,checked){if(checked)selectedBoard[kind].add(id);else selectedBoard[kind].delete(id);boardRefreshBulk(kind)}
+function boardSelectAll(kind,checked){document.querySelectorAll('input[data-board-select="'+kind+'"]').forEach(el=>{el.checked=checked;boardToggle(kind,el.value,checked)})}
+function boardRefreshBulk(kind){
+const slot=document.getElementById('bulkbar-'+kind);if(!slot)return;
+const count=selectedBoard[kind].size;
+slot.innerHTML=count?'<div class="bulkbar"><b>'+count+' selected</b>'+btn('Change status','boardBulkStatus(\''+kind+'\')')+btn('Assign owner','boardBulkOwner(\''+kind+'\')')+(kind==='project'?btn('Change workstream',"boardBulkCategory('workstream')")+btn('Change asset',"boardBulkCategory('asset')"):'')+btn('Archive','boardBulkState(\''+kind+'\',\'archived\')')+btn('Move to Trash','boardBulkState(\''+kind+'\',\'deleted\')')+btn('Clear selection','boardClear(\''+kind+'\')')+'</div>':'';
+}
+function boardClear(kind){selectedBoard[kind].clear();render()}
+function boardBulkApply(kind,key,value){const ids=selectedBoard[kind];let n=0;for(const x of boardCollection(kind)){if(ids.has(x.id)&&x.state==='active'){x[key]=value;n++}}log('Bulk updated '+n+' '+kind+' records: '+key);save();boardClear(kind)}
+function boardBulkStatus(kind){const v=prompt('New status for selected '+kind+'s:\\n'+boardStatus().join(' / '));if(v===null)return;const found=boardStatus().find(s=>s.toLowerCase()===v.trim().toLowerCase());if(!found)return alert('Invalid status');boardBulkApply(kind,'status',found)}
+function boardBulkOwner(kind){const v=prompt('Enter exact team member name for '+selectedBoard[kind].size+' records:');if(v===null)return;const found=db.team.find(t=>t.active&&t.name.toLowerCase()===v.trim().toLowerCase());if(!found)return alert('Team member not found');boardBulkApply(kind,'owner',found.id)}
+function boardBulkCategory(key){const v=prompt('Enter exact '+key+' name:');if(v===null)return;const list=db[key==='asset'?'assets':'workstreams'];const found=list.find(x=>x.toLowerCase()===v.trim().toLowerCase());if(!found)return alert('Category not found. Add it under Workstreams & Assets first.');boardBulkApply('project',key,found)}
+function boardBulkState(kind,state){if(!confirm('Move '+selectedBoard[kind].size+' selected '+kind+' records to '+(state==='deleted'?'Trash':'Archive')+'?'))return;boardBulkApply(kind,'state',state)}
+function boardColumnToggle(kind,key,checked){const cols=boardConfig[kind].columns;boardConfig[kind].columns=checked?[...cols,key]:cols.filter(x=>x!==key);if(!boardConfig[kind].columns.length)boardConfig[kind].columns=['name'];boardSave();render()}
+function boardFilterChange(kind,key,value){boardConfig[kind][key]=value;boardSave();render()}
+function boardControls(kind){
+const cfg=boardConfig[kind],items=boardFields[kind];
+const filterSelect=(key,label,values)=>'<label>'+label+' <select onchange="boardFilterChange(\''+kind+'\',\''+key+'\',this.value)">'+boardDropdown([['All','All'],...values.map(x=>[x,x])],cfg[key])+'</select></label>';
+return '<div class="board-controls"><div class="toolbar">'+filterSelect('status','Status',boardStatus())+(kind==='project'?filterSelect('workstream','Workstream',db.workstreams)+filterSelect('asset','Asset',db.assets):'')+'<label>Sort by <select onchange="boardFilterChange(\''+kind+'\',\'sort\',this.value)">'+boardDropdown(items.filter(x=>!['actions','notes'].includes(x[0])),cfg.sort)+'</select></label><label>Order <select onchange="boardFilterChange(\''+kind+'\',\'direction\',this.value)">'+boardDropdown([['asc','Ascending'],['desc','Descending']],cfg.direction)+'</select></label><details><summary>⚙ Columns</summary><div class="column-panel">'+items.map(([key,label])=>'<label><input type="checkbox" '+(cfg.columns.includes(key)?'checked':'')+' onchange="boardColumnToggle(\''+kind+'\',\''+key+'\',this.checked)">'+esc(label)+'</label>').join('')+'<p class="muted">Changes are saved in this browser.</p></div></details>'+btn('Clear filters','boardResetFilters(\''+kind+'\')')+'</div><div id="bulkbar-'+kind+'"></div></div>';
+}
+function boardResetFilters(kind){Object.assign(boardConfig[kind],{status:'All',workstream:'All',asset:'All',sort:'name',direction:'asc'});boardSave();render()}
+function boardFiltered(kind,items){const cfg=boardConfig[kind];return items.filter(x=>cfg.status==='All'||x.status===cfg.status).filter(x=>kind!=='project'||cfg.workstream==='All'||x.workstream===cfg.workstream).filter(x=>kind!=='project'||cfg.asset==='All'||x.asset===cfg.asset).sort((a,b)=>{let va=a[cfg.sort]||'',vb=b[cfg.sort]||'';if(cfg.sort==='owner'){va=person(va);vb=person(vb)}if(cfg.sort==='projectId'){va=project(va);vb=project(vb)}return String(va).localeCompare(String(vb),undefined,{numeric:true})*(cfg.direction==='desc'?-1:1)})}
+const previousDraw=draw;
+draw=function(){
+if(page==='Projects & Campaigns'||page==='My Actions'){
+const kind=page==='My Actions'?'action':'project';
+const oldProjectTable=projectTable,oldActionTable=actionTable;
+projectTable=items=>boardTable('project',boardFiltered('project',items));
+actionTable=items=>boardTable('action',boardFiltered('action',items));
+previousDraw();
+projectTable=oldProjectTable;actionTable=oldActionTable;
+const view=document.getElementById('view');
+const anchor=view.querySelector('.toolbar');
+if(anchor){anchor.insertAdjacentHTML('beforebegin',boardControls(kind));boardRefreshBulk(kind)}
+}else previousDraw();
+}
+render();
+</script>
+</body></html>
